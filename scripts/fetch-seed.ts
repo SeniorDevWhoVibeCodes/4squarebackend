@@ -57,10 +57,16 @@ async function main() {
     const activeEvents: any[] = [];
     
     for (const [ticker, markets] of eventGroups.entries()) {
-        if (markets.length > 4 || markets.length < 1) continue;
+        if (markets.length > 4 || markets.length < 2) continue;
 
         // Sort by yes_ask to find Top 2 cost
-        const options = markets.filter(m => (m.yes_ask || 0) > 0);
+        // Filter: Keep if cost <= 100 (Profit >= 0)
+        // Adjust threshold as needed. You mentioned ~80 items.
+        // Also filter out markets with 0 bids (dead markets)
+        const validMarkets = markets.filter(m => m.yes_bid > 0 && m.no_bid > 0);
+        if (validMarkets.length < 1) continue;
+
+        const options = validMarkets.filter(m => (m.yes_ask || 0) > 0);
         if (options.length < 1) continue;
 
         const sorted = [...options].sort((a, b) => (b.yes_ask || 0) - (a.yes_ask || 0));
@@ -79,6 +85,8 @@ async function main() {
             subtitle: m.subtitle,
             yes_ask: m.yes_ask,
             no_ask: m.no_ask,
+            yes_bid: m.yes_bid, // Critical for worker filtering
+            no_bid: m.no_bid,   // Critical for worker filtering
             close_time: m.close_time,
             open_time: m.open_time,
             rules_primary: m.rules_primary

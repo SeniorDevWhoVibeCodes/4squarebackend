@@ -7,6 +7,8 @@ interface Market {
   subtitle?: string;
   yes_ask: number;
   no_ask: number;
+  yes_bid: number;
+  no_bid: number;
   close_time: string;
   open_time: string;
   event_ticker: string;
@@ -24,6 +26,7 @@ interface EventGroup {
       cost: number;
       profit: number;
       details: string;
+      topTicker: string;
   };
 }
 
@@ -34,21 +37,31 @@ const isWaitingForRefresh = ref(false);
 
 const searchQuery = ref('');
 const minProfit = ref(1);
+const maxProfit = ref(100);
+const sortOrder = ref<'desc' | 'asc'>('desc');
 const maxDays = ref(30);
 const minDaysOpen = ref(0);
-const strikeCounts = ref<number[]>([1, 2, 3, 4]);
+const strikeCounts = ref<number[]>([2, 3, 4]);
 const endingTomorrow = ref(false);
-const topXOptions = ref<number[]>([2]); // Default to Top 2
+const topXOptions = ref<number[]>([2]);
 
 const hiddenList = ref<string[]>(JSON.parse(localStorage.getItem('hiddenEvents') || '[]'));
 const watchList = ref<string[]>(JSON.parse(localStorage.getItem('watchedEvents') || '[]'));
 
-const getMarketUrl = (eventTicker: string) => {
+const getMarketUrl = (eventTicker: string, marketTicker: string | undefined, title: string) => {
   if (!eventTicker) return '#';
   const parts = eventTicker.split('-');
-  const seriesTicker = parts[0];
+  const seriesTicker = parts[0]?.toLowerCase();
   if (!seriesTicker) return '#';
-  return `https://kalshi.com/markets/${seriesTicker.toLowerCase()}`;
+  
+  // Create slug from title
+  const slug = title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '');
+
+  const url = `https://kalshi.com/markets/${seriesTicker}/${slug}/${eventTicker}`;
+  return marketTicker ? `${url}?marketTicker=${marketTicker}` : url;
 };
 
 const fetchData = async () => {
@@ -100,7 +113,6 @@ const unhideAll = () => {
 
 const toggleTopX = (n: number) => {
     if (topXOptions.value.includes(n)) {
-        // Don't allow empty selection, keep at least one
         if (topXOptions.value.length > 1) {
             topXOptions.value = topXOptions.value.filter(x => x !== n);
         }
@@ -112,21 +124,18 @@ const toggleTopX = (n: number) => {
 const calculateGroupStats = (group: EventGroup) => {
     const sorted = [...group.markets].sort((a, b) => (b.yes_ask || 0) - (a.yes_ask || 0));
     
-    // Calculate stats for all selected Top X options
     const possibleStats = topXOptions.value.map(n => {
         const selected = sorted.slice(0, n);
         const cost = selected.reduce((sum, m) => sum + (m.yes_ask || 0), 0);
         const profit = 100 - cost;
         const details = selected.map(m => `${m.title} (${m.yes_ask}¢)`).join(' + ');
-        return { n, cost, profit, details };
+        return { n, cost, profit, details, topTicker: selected[0]?.ticker };
     });
 
     if (possibleStats.length === 0) {
-        return { n: 0, cost: 0, profit: 0, details: 'None' };
+        return { n: 0, cost: 0, profit: 0, details: 'None', topTicker: '' };
     }
 
-    // Return the best one (highest profit)
-    // If profits are equal, prefer lower N (less contracts to buy)
     return possibleStats.reduce((best, current) => {
         if (!best) return current;
         if (current.profit > best.profit) return current;
@@ -152,18 +161,15 @@ const filteredGroups = computed(() => {
                           g.eventTicker.toLowerCase().includes(searchLower) ||
                           g.markets.some(m => m.rules_primary?.toLowerCase().includes(searchLower));
     
-    const matchesProfit = g.stats.profit >= minProfit.value;
+    const matchesProfit = g.stats.profit >= minProfit.value && g.stats.profit <= maxProfit.value;
     const matchesStrikes = strikeCounts.value.includes(g.marketCount);
     const isHidden = hiddenList.value.includes(g.eventTicker);
     
-    // Date Logic with Safety Checks
     let matchesDateEnd = true;
     let matchesDateStart = true;
 
     if (g.markets.length > 0) {
-        // Safe parsing helper
         const getTs = (dateStr: string | undefined) => dateStr ? new Date(dateStr).getTime() / 1000 : NaN;
-        
         const closeTimes = g.markets.map(m => getTs(m.close_time)).filter(t => !isNaN(t));
         const openTimes = g.markets.map(m => getTs(m.open_time)).filter(t => !isNaN(t));
 
@@ -189,7 +195,8 @@ const filteredGroups = computed(() => {
     
     const profitA = a.stats?.profit ?? -999;
     const profitB = b.stats?.profit ?? -999;
-    return profitB - profitA;
+    
+    return sortOrder.value === 'desc' ? profitB - profitA : profitA - profitB;
   });
 });
 
@@ -198,19 +205,15 @@ onMounted(fetchData);
 
 <template>
   <main class="space-y-6">
-    <!-- Controls Section -->
     <div class="p-6 bg-gray-800 border border-gray-700 rounded-lg shadow-sm">
       <div class="flex flex-col gap-6">
         
-        <!-- Top Row: Search & Dates -->
         <div class="flex flex-col md:flex-row gap-6">
-           <!-- Search -->
            <div class="flex-grow">
               <label for="search" class="block mb-2 text-sm font-medium text-white">Search (Title, Ticker, Rules)</label>
               <input v-model="searchQuery" type="text" id="search" class="bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" placeholder="Search keywords..." />
            </div>
 
-           <!-- Dates -->
            <div class="flex gap-4 flex-shrink-0">
                <div class="flex flex-col w-32">
                     <label class="block mb-2 text-sm font-medium text-white">Max Days Left</label>
@@ -223,18 +226,28 @@ onMounted(fetchData);
            </div>
         </div>
         
-        <!-- Middle Row: Profit, Top X, Strikes -->
         <div class="flex flex-col lg:flex-row gap-6 items-end">
-            <!-- Min Profit -->
             <div class="flex-grow w-full lg:w-auto">
                 <label class="block mb-2 text-sm font-medium text-white flex justify-between">
-                    <span>Min Profit</span>
-                    <span :class="minProfit > 0 ? 'text-green-400' : 'text-gray-400'">{{ minProfit }}¢</span>
+                    <span>Profit Range (¢)</span>
+                    <span class="text-green-400 font-bold">{{ minProfit }} to {{ maxProfit }}</span>
                 </label>
-                <input v-model.number="minProfit" type="range" min="1" max="100" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+                <div class="flex items-center gap-4">
+                    <input v-model.number="minProfit" type="number" min="-100" max="100" class="bg-gray-700 border border-gray-600 text-white text-xs rounded p-1.5 w-16" />
+                    <input v-model.number="minProfit" type="range" min="-100" max="100" class="flex-grow h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+                    <input v-model.number="maxProfit" type="range" min="-100" max="100" class="flex-grow h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+                    <input v-model.number="maxProfit" type="number" min="-100" max="100" class="bg-gray-700 border border-gray-600 text-white text-xs rounded p-1.5 w-16" />
+                </div>
             </div>
 
-            <!-- Top X Selector -->
+            <div class="flex flex-col flex-shrink-0">
+                <label class="block mb-2 text-sm font-medium text-white">Sort By Profit</label>
+                <select v-model="sortOrder" class="bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
+                    <option value="desc">Highest to Lowest</option>
+                    <option value="asc">Lowest to Highest</option>
+                </select>
+            </div>
+
             <div class="flex flex-col flex-shrink-0">
                 <label class="block mb-2 text-sm font-medium text-white">Top X Options</label>
                 <div class="flex gap-1 bg-gray-700 p-1 rounded-lg">
@@ -245,11 +258,10 @@ onMounted(fetchData);
                 </div>
             </div>
 
-             <!-- Strikes -->
             <div class="flex flex-col flex-shrink-0">
                <label class="block mb-2 text-sm font-medium text-white">Strikes</label>
                <div class="flex gap-2 bg-gray-700 p-1.5 rounded-lg items-center h-[42px]">
-                 <div v-for="n in [1, 2, 3, 4]" :key="n" class="flex items-center px-2">
+                 <div v-for="n in [2, 3, 4]" :key="n" class="flex items-center px-2">
                     <input :id="'checkbox-'+n" type="checkbox" :value="n" v-model="strikeCounts" class="w-4 h-4 text-blue-600 bg-gray-600 border-gray-500 rounded focus:ring-blue-600 ring-offset-gray-800 focus:ring-2">
                     <label :for="'checkbox-'+n" class="ms-2 text-sm font-medium text-gray-300 cursor-pointer">{{ n }}</label>
                  </div>
@@ -257,9 +269,7 @@ onMounted(fetchData);
             </div>
         </div>
 
-        <!-- Bottom Row: Toggles & Actions -->
         <div class="flex flex-col sm:flex-row justify-between items-center gap-4 pt-4 border-t border-gray-700">
-            <!-- Quick Filters -->
             <div class="flex items-center">
                 <label class="inline-flex items-center cursor-pointer">
                     <input type="checkbox" v-model="endingTomorrow" class="sr-only peer">
@@ -268,7 +278,6 @@ onMounted(fetchData);
                 </label>
             </div>
 
-            <!-- Stats & Refresh -->
             <div class="flex items-center gap-6 w-full sm:w-auto justify-between sm:justify-end">
                 <span class="text-sm text-gray-400 whitespace-nowrap">Found {{ filteredGroups.length }} events</span>
                 <button @click="fetchData" type="button" class="text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:ring-blue-800 font-medium rounded-lg text-sm px-6 py-2.5 transition-colors">
@@ -276,15 +285,13 @@ onMounted(fetchData);
                 </button>
             </div>
         </div>
-
       </div>
     </div>
 
-    <!-- Status Messages -->
     <div v-if="loading" class="text-center p-8">
         <div role="status">
             <svg aria-hidden="true" class="inline w-8 h-8 text-gray-600 animate-spin fill-blue-600" viewBox="0 0 100 101" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M100 50.5908C100 78.2051 77.6142 100.591 50 100.591C22.3858 100.591 0 78.2051 0 50.5908C0 22.9766 22.9766 0.59082 50 0.59082C77.6142 0.59082 100 22.9766 100 50.5908ZM9.08144 50.5908C9.08144 73.1895 27.4013 91.5094 50 91.5094C72.5987 91.5094 90.9186 73.1895 90.9186 50.5908C90.9186 27.9921 72.5987 9.67226 50 9.67226C27.4013 9.67226 9.08144 27.9921 9.08144 50.5908Z" fill="currentColor"/>
+                <path d="M100 50.5908C100 78.2051 77.6142 100.591 50 100.591C22.3858 100.591 0 78.2051 0 50.5908C0 22.9766 22.3858 0.59082 50 0.59082C77.6142 0.59082 100 22.9766 100 50.5908ZM9.08144 50.5908C9.08144 73.1895 27.4013 91.5094 50 91.5094C72.5987 91.5094 90.9186 73.1895 90.9186 50.5908C90.9186 27.9921 72.5987 9.67226 50 9.67226C27.4013 9.67226 9.08144 27.9921 9.08144 50.5908Z" fill="currentColor"/>
                 <path d="M93.9676 39.0409C96.393 38.4038 97.8624 35.9116 97.0079 33.5539C95.2932 28.8227 92.871 24.3692 89.8167 20.348C85.8452 15.1192 80.8826 10.7238 75.2124 7.41289C69.5422 4.10194 63.2754 1.94025 56.7698 1.05124C51.7666 0.367541 46.6976 0.446843 41.7345 1.27873C39.2613 1.69328 37.813 4.19778 38.4501 6.62326C39.0873 9.04874 41.5694 10.4717 44.0505 10.1071C47.8511 9.54855 51.7191 9.52689 55.5402 10.0491C60.8642 10.7766 65.9928 12.5457 70.6331 15.2552C75.2735 17.9648 79.3347 21.5619 82.5849 25.841C84.9175 28.9121 86.7997 32.2913 88.1811 35.8758C89.083 38.2158 91.5421 39.6781 93.9676 39.0409Z" fill="currentFill"/>
             </svg>
         </div>
@@ -297,7 +304,6 @@ onMounted(fetchData);
       {{ error }}. Retrying in 15s...
     </div>
 
-    <!-- Grid -->
     <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
       <div v-for="group in filteredGroups" :key="group.eventTicker" 
            class="p-6 bg-gray-800 border border-gray-700 rounded-lg shadow-sm flex flex-col transition-all hover:-translate-y-1 hover:border-green-400"
@@ -334,7 +340,7 @@ onMounted(fetchData);
             </div>
         </div>
         
-        <a :href="getMarketUrl(group.eventTicker)" target="_blank" class="inline-flex items-center justify-center px-3 py-2 text-sm font-medium text-center text-white bg-green-600 rounded-lg hover:bg-green-700 focus:ring-4 focus:ring-green-800">
+        <a :href="getMarketUrl(group.eventTicker, group.stats?.topTicker, group.title)" target="_blank" class="inline-flex items-center justify-center px-3 py-2 text-sm font-medium text-center text-white bg-green-600 rounded-lg hover:bg-green-700 focus:ring-4 focus:ring-green-800">
             View on Kalshi
             <svg class="w-3.5 h-3.5 ms-2" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 10">
                 <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M1 5h12m0 0L9 1m4 4L9 9"/>
@@ -343,7 +349,6 @@ onMounted(fetchData);
       </div>
     </div>
 
-    <!-- Hidden Manager -->
     <div v-if="hiddenList.length > 0" class="flex justify-center mt-8">
         <button @click="unhideAll" type="button" class="text-gray-300 bg-gray-800 border border-gray-600 hover:bg-gray-700 font-medium rounded-lg text-sm px-5 py-2.5">
             Unhide All ({{ hiddenList.length }})

@@ -19,7 +19,7 @@ export class MarketManager extends DurableObject<Env> {
 		});
 		const marketsApi = new MarketApi(config);
 
-		const SCHEMA_VERSION = 3; // Bump this via 'pnpm run bump' to force a re-seed
+		const SCHEMA_VERSION = 6; // Bump this via 'pnpm run bump' to force a re-seed
 
 		// Load State
 		console.log("📂 Loading state from storage...");
@@ -201,11 +201,15 @@ export class MarketManager extends DurableObject<Env> {
 	generateResults(activeEvents: Map<string, Market[]>) {
 		const results: any[] = [];
 		for (const [ticker, markets] of activeEvents) {
-			// Double check count (should be <= 4)
-			if (markets.length > 4 || markets.length < 1) continue;
+			// Double check count (should be 2-4)
+			if (markets.length > 4 || markets.length < 2) continue;
+
+			// Filter out illiquid markets (0 bids)
+			const validMarkets = markets.filter(m => m.yes_bid > 0 && m.no_bid > 0);
+			if (validMarkets.length < 1) continue;
 
 			// Sort
-			const sorted = [...markets].sort((a, b) => (b.yes_ask || 0) - (a.yes_ask || 0));
+			const sorted = [...validMarkets].sort((a, b) => (b.yes_ask || 0) - (a.yes_ask || 0));
 			const top2 = sorted.slice(0, 2);
 			const cost = (top2[0]?.yes_ask || 0) + (top2[1]?.yes_ask || 0);
 
@@ -213,7 +217,7 @@ export class MarketManager extends DurableObject<Env> {
 				eventTicker: ticker,
 				title: markets[0].title,
 				subtitle: markets[0].subtitle,
-				marketCount: markets.length,
+				marketCount: validMarkets.length,
 				markets: sorted.map(m => ({
 					ticker: m.ticker,
 					title: m.title,
