@@ -67,7 +67,15 @@ const copyToClipboard = (text: string) => {
         <code @click="copyToClipboard(ltc)" class="block w-full bg-gray-900 p-3 rounded text-sm font-mono text-gray-300 break-all cursor-pointer hover:bg-gray-700 transition-colors" title="Click to copy">
           {{ ltc }}
         </code>
-      </div>
-    </div>
-  </div>
-</template>
+            </div>
+          </div>
+      
+          <div class="mt-16 border-t border-gray-700 pt-8 text-gray-400">
+            <p class="mb-2">If you want the source, thanks for at least looking at the tip page!</p>
+            <a href="https://github.com/SeniorDevWhoVibeCodes/4squarebackend" target="_blank" class="text-blue-400 hover:text-blue-300 underline font-medium">
+              SeniorDevWhoVibeCodes/4squarebackend
+            </a>
+          </div>
+        </div>
+      </template>
+      
