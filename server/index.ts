@@ -14,6 +14,7 @@ export default {
 					headers: {
 						"Content-Type": "application/json",
 						"Access-Control-Allow-Origin": "*",
+						"Cache-Control": "public, max-age=300, s-maxage=300",
 					},
 				});
 			}
@@ -24,6 +25,7 @@ export default {
 				headers: {
 					"Content-Type": "application/json",
 					"Access-Control-Allow-Origin": "*",
+					"Cache-Control": "no-cache",
 					"X-Status": "Initializing"
 				},
 			});

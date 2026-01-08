@@ -19,9 +19,22 @@ export class MarketManager extends DurableObject<Env> {
 		});
 		const marketsApi = new MarketApi(config);
 
+		const SCHEMA_VERSION = 3; // Bump this via 'pnpm run bump' to force a re-seed
+
 		// Load State
 		console.log("📂 Loading state from storage...");
+		let storedVersion = await this.ctx.storage.get<number>("schema_version") || 0;
 		let initComplete = await this.ctx.storage.get<boolean>("init_complete") || false;
+
+		// Force Re-Init if version mismatch
+		if (storedVersion !== SCHEMA_VERSION) {
+			console.log(`♻️ Schema Update (v${storedVersion} -> v${SCHEMA_VERSION}). Wiping storage...`);
+			await this.ctx.storage.deleteAll();
+			initComplete = false;
+			// Re-save the new version immediately
+			await this.ctx.storage.put("schema_version", SCHEMA_VERSION);
+		}
+
 		let ignoredEvents = new Set(await this.ctx.storage.get<string[]>("ignored_events") || []);
 		let lastScanTs = await this.ctx.storage.get<number>("last_scan_ts");
 
