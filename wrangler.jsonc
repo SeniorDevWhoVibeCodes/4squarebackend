@@ -4,6 +4,15 @@
  */
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
+	"routes": [
+		{
+			"pattern": "4-square.org",
+			"custom_domain": true
+		}
+	],
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
 	"name": "4squarebackend",
 	"compatibility_date": "2025-09-27",
 	"main": "server/index.ts",
@@ -12,6 +21,33 @@
 	},
 	"observability": {
 		"enabled": true
+	},
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "MARKET_MANAGER",
+				"class_name": "MarketManager"
+			}
+		]
+	},
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": [
+				"MarketManager"
+			]
+		}
+	],
+	"kv_namespaces": [
+		{
+			"binding": "MARKET_CACHE",
+			"id": "421cd0fab2604a63a419a85f7a18985e"
+		}
+	],
+	"triggers": {
+		"crons": [
+			"*/5 * * * *"
+		]
 	}
 	/**
 	 * Smart Placement
